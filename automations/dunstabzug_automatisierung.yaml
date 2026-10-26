@@ -1,0 +1,291 @@
+blueprint:
+  name: Dunstabzug – Koch-Erkennung per Temperaturanstieg
+  description: >-
+    Erkennt Kochaktivität an der Änderungsrate der Temperatur, z. B. am
+    Klimasensor direkt am Dunstabzug. Das passt zu einem Gasherd, bei dem die
+    Abwärme das stärkste Signal ist. Absolute Temperaturen werden nicht als
+    Kochsignal verwendet, da sie vom normalen Küchenklima abhängen. Der Anstieg
+    muss eine Bestätigungsdauer lang anhalten und die Küche bereits eine
+    Vorlaufzeit lang betreten sein, damit das blosse Betreten des Raums nicht
+    einschaltet.
+  domain: automation
+  source_url: https://github.com/sanftleben/homeassistant/blob/main/automations/dunstabzug_automatisierung.yaml
+  input:
+    temperature_rate_sensor:
+      name: Temperatur – Änderungsrate
+      description: >-
+        Derivative-Sensor der Küchentemperatur in °C/min. Positive Werte
+        bedeuten steigende Temperatur. Ein Rohsensor (z. B. 22 °C) ist hier
+        falsch und würde dauerhaft als Kochen gewertet.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+
+    temperature_rise_threshold:
+      name: Temperatur – Koch-Anstieg
+      description: >-
+        Ab diesem Anstieg pro Minute gilt es als Kochen. Der Standardwert liegt
+        knapp unter dem schwächsten gemessenen Kochvorgang (Spitze 0,74
+        °C/min). Kurze Störungen erreichen bis ca. 0,6 °C/min, halten das
+        aber meist nur kurz.
+      default: 0.5
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 0.01
+          unit_of_measurement: '°C/min'
+          mode: box
+
+    temperature_fall_threshold:
+      name: Temperatur – Abschalt-Schwelle (Abstieg)
+      description: >-
+        Fällt die Änderungsrate unter diesen Wert, gilt das Kochen als beendet.
+        Der Wert ist negativ: Es muss ein echter Temperaturabfall erkannt
+        werden. Beim Kochen bleibt die Temperatur oft auf einem Plateau (Rate
+        nahe 0), der Dunstabzug soll dabei anbleiben.
+      default: -0.25
+      selector:
+        number:
+          min: -10
+          max: 20
+          step: 0.01
+          unit_of_measurement: '°C/min'
+          mode: box
+
+    occupancy_sensor:
+      name: Anwesenheitssensor Küche
+      description: Automatisches Einschalten erfolgt nur bei erkannter Anwesenheit.
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+
+    window_sensor:
+      name: Fensterkontakt Küche
+      description: >-
+        Wird das Fenster geöffnet, schaltet der Dunstabzug aus und startet
+        nicht, solange das Fenster offen ist. Erwartet 'on' für offen.
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+
+    window_resume_max:
+      name: Wiedereinschalten nach Fenster – maximale Öffnungsdauer
+      description: >-
+        Wird das Fenster geschlossen, schaltet der Dunstabzug wieder ein, wenn
+        er durch das Öffnen ausgeschaltet wurde, die Küche belegt ist und das
+        Fenster höchstens so lange offen war. Danach wird von Kochende
+        ausgegangen.
+      default:
+        minutes: 20
+      selector:
+        duration:
+          enable_day: false
+          enable_millisecond: false
+          enable_second: true
+
+    exhaust_fan:
+      name: Dunstabzug
+      description: Schalter oder Lüfter für den Dunstabzug.
+      selector:
+        entity:
+          filter:
+            - domain:
+                - switch
+                - fan
+
+    presence_warmup:
+      name: Anwesenheits-Vorlaufzeit
+      description: >-
+        So lange muss die Küche bereits durchgehend belegt sein, bevor
+        überhaupt eingeschaltet werden darf. Verhindert, dass das blosse
+        Betreten des Raums den Dunstabzug startet, und gibt dem
+        Derivative-Sensor Zeit, sich auf die neue Raumsituation einzupendeln.
+      default:
+        minutes: 3
+      selector:
+        duration:
+          enable_day: false
+          enable_millisecond: false
+          enable_second: true
+
+    sustain_duration:
+      name: Bestätigungsdauer
+      description: >-
+        So lange muss die Änderungsrate ununterbrochen über der Koch-Schwelle
+        liegen, bevor eingeschaltet wird. Kurze Messspitzen durch Türöffnen
+        oder Körperwärme fallen damit heraus.
+      default:
+        minutes: 1
+      selector:
+        duration:
+          enable_day: false
+          enable_millisecond: false
+          enable_second: true
+
+    start_time:
+      name: Früheste Einschaltzeit
+      default: '06:00:00'
+      selector:
+        time: {}
+
+    end_time:
+      name: Späteste Einschaltzeit
+      default: '22:00:00'
+      selector:
+        time: {}
+
+    off_delay:
+      name: Nachlaufzeit
+      description: >-
+        So lange muss die Temperatur durchgehend fallen (Änderungsrate unter
+        der Abschalt-Schwelle), bevor der Dunstabzug ausgeschaltet wird.
+      default:
+        minutes: 2
+      selector:
+        duration:
+          enable_day: false
+          enable_millisecond: false
+          enable_second: true
+
+mode: restart
+max_exceeded: silent
+
+triggers:
+  # Turn-on candidate: the rate stays above the cooking threshold for the
+  # sustain duration. numeric_state only fires on crossing the threshold.
+  - trigger: numeric_state
+    entity_id: !input temperature_rate_sensor
+    above: !input temperature_rise_threshold
+    for: !input sustain_duration
+    id: cooking
+
+  # Cooking started before the kitchen counted as occupied: re-check once the
+  # warmup has passed. The rate trigger above does not fire again because the
+  # threshold is already exceeded.
+  - trigger: state
+    entity_id: !input occupancy_sensor
+    to: 'on'
+    for: !input presence_warmup
+    id: cooking
+
+  # Turn-off: the temperature is falling, i.e. the rate stays below the
+  # (negative) fall threshold for the off delay. A plateau with a rate around
+  # 0 keeps the fan on.
+  - trigger: numeric_state
+    entity_id: !input temperature_rate_sensor
+    below: !input temperature_fall_threshold
+    for: !input off_delay
+    id: cooldown
+
+  # Window handling: opening switches the fan off, closing may resume it.
+  - trigger: state
+    entity_id: !input window_sensor
+    to: 'on'
+    id: window_open
+  - trigger: state
+    entity_id: !input window_sensor
+    from: 'on'
+    to: 'off'
+    id: window_closed
+
+  # Safety net in case the automation was reloaded while the fan was running.
+  - trigger: time
+    at: !input end_time
+    id: end_time
+
+variables:
+  exhaust_fan: !input exhaust_fan
+  window_resume_max: !input window_resume_max
+  window_resume_max_seconds: >-
+    {{ (window_resume_max.hours | default(0) | int(0)) * 3600
+       + (window_resume_max.minutes | default(0) | int(0)) * 60
+       + (window_resume_max.seconds | default(0) | int(0)) }}
+
+conditions: []
+
+actions:
+  - choose:
+      - alias: Dunstabzug einschalten
+        conditions:
+          - condition: trigger
+            id: cooking
+          - condition: time
+            after: !input start_time
+            before: !input end_time
+          - condition: state
+            entity_id: !input occupancy_sensor
+            state: 'on'
+            for: !input presence_warmup
+          - condition: state
+            entity_id: !input exhaust_fan
+            state: 'off'
+          - condition: state
+            entity_id: !input window_sensor
+            state: 'off'
+          - condition: numeric_state
+            entity_id: !input temperature_rate_sensor
+            above: !input temperature_rise_threshold
+        sequence:
+          - action: homeassistant.turn_on
+            target:
+              entity_id: !input exhaust_fan
+
+      - alias: Dunstabzug bei geöffnetem Fenster ausschalten
+        conditions:
+          - condition: trigger
+            id: window_open
+          - condition: state
+            entity_id: !input exhaust_fan
+            state: 'on'
+        sequence:
+          - action: homeassistant.turn_off
+            target:
+              entity_id: !input exhaust_fan
+
+      - alias: Dunstabzug nach Schliessen des Fensters wieder einschalten
+        conditions:
+          - condition: trigger
+            id: window_closed
+          - condition: time
+            after: !input start_time
+            before: !input end_time
+          - condition: state
+            entity_id: !input occupancy_sensor
+            state: 'on'
+          - condition: state
+            entity_id: !input exhaust_fan
+            state: 'off'
+          # The fan was switched off by the window opening, not by the
+          # cooldown or manually before: it changed after the window opened.
+          - condition: template
+            value_template: >-
+              {% set opened = trigger.from_state.last_changed %}
+              {{ states[exhaust_fan].last_changed >= opened
+                 and (now() - opened).total_seconds() <= window_resume_max_seconds }}
+        sequence:
+          - action: homeassistant.turn_on
+            target:
+              entity_id: !input exhaust_fan
+
+      - alias: Dunstabzug ausschalten
+        conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: cooldown
+              - condition: trigger
+                id: end_time
+          - condition: state
+            entity_id: !input exhaust_fan
+            state: 'on'
+          - condition: numeric_state
+            entity_id: !input temperature_rate_sensor
+            below: !input temperature_rise_threshold
+        sequence:
+          - action: homeassistant.turn_off
+            target:
+              entity_id: !input exhaust_fan

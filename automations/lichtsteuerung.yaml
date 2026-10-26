@@ -1,0 +1,347 @@
+blueprint:
+  name: Bewegungs-/Präsenzgesteuerte Beleuchtung mit Tageszeit und Außenhelligkeit
+  description: >
+    Steuert eine oder mehrere Leuchten anhand von Bewegungs- und Präsenzsensoren.
+    Mehrere Sensoren können zum Einschalten wahlweise mit ODER oder UND verknüpft
+    werden. Zum Ausschalten gilt immer UND: Erst wenn alle Sensoren inaktiv sind,
+    startet die Ausschaltverzögerung.
+    Die Helligkeit wird abhängig von vier Zeitprofilen gesetzt. Optional kann ein
+    Außen-Helligkeitssensor das Einschalten auslösen, wenn es dunkel wird und
+    gleichzeitig die Sensor-Verknüpfung erfüllt ist.
+    Die Außenhelligkeit schaltet das Licht niemals aus.
+  domain: automation
+
+  input:
+    trigger_entities:
+      name: Bewegungs-/Präsenzsensoren
+      description: >
+        Sensoren (Bewegung, Belegung, Präsenz), die das Licht einschalten können.
+        Wie mehrere Sensoren beim Einschalten verknüpft werden, legt die Option
+        "Verknüpfung der Sensoren" fest. Beim Ausschalten wird immer gewartet,
+        bis alle ausgewählten Sensoren inaktiv sind.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: binary_sensor
+              device_class:
+                - motion
+                - occupancy
+                - presence
+
+    trigger_logic:
+      name: Verknüpfung der Sensoren (Einschalten)
+      description: >
+        ODER: Ein aktiver Sensor genügt zum Einschalten.
+        UND: Alle ausgewählten Sensoren müssen gleichzeitig aktiv sein
+        (z. B. Bewegung UND Präsenz).
+        Für das Ausschalten gilt unabhängig davon immer UND – das Licht geht
+        erst aus, wenn alle Sensoren inaktiv sind.
+      default: "or"
+      selector:
+        select:
+          options:
+            - label: ODER – mindestens ein Sensor aktiv
+              value: "or"
+            - label: UND – alle Sensoren aktiv
+              value: "and"
+
+    target_lights:
+      name: Leuchten / Schalter
+      description: >
+        Eine oder mehrere Leuchten oder Schalter (z. B. Leuchten in einer
+        schaltbaren Steckdose), die gesteuert werden sollen.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: light
+            - domain: switch
+
+    off_delay:
+      name: Ausschaltverzögerung
+      description: >
+        Zeit, die nach dem Ausschalten aller Bewegungs-/Präsenzsensoren gewartet wird.
+      default:
+        minutes: 2
+      selector:
+        duration: {}
+
+    condition_extra:
+      name: Zusätzliche Bedingungen
+      description: Optionale zusätzliche Home-Assistant-Bedingungen.
+      default: []
+      selector:
+        condition: {}
+
+    use_ambient_light:
+      name: Außenhelligkeit als Trigger verwenden
+      description: >
+        Wenn aktiviert, kann ein Absinken der Außenhelligkeit das Licht einschalten,
+        sofern die Sensor-Verknüpfung erfüllt ist (ODER: mindestens ein Sensor
+        aktiv, UND: alle Sensoren aktiv).
+      default: true
+      selector:
+        boolean: {}
+
+    ambient_light_sensor:
+      name: Außenhelligkeitssensor
+      description: >
+        Sensor mit einem numerischen Helligkeitswert in Lux. Wird nur benötigt,
+        wenn die Außenhelligkeit als Trigger verwendet werden soll.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: illuminance
+
+    ambient_light_on_threshold:
+      name: Einschalt-Schwelle Außenhelligkeit
+      description: >
+        Unterhalb dieses Lux-Wertes gilt es als dunkel genug. Der Trigger erfolgt
+        beim Unterschreiten dieser Schwelle.
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 1
+          unit_of_measurement: lx
+          mode: box
+
+    ambient_light_reset_threshold:
+      name: Rückkehr-Schwelle Außenhelligkeit
+      description: >
+        Oberhalb dieses Wertes gilt die Helligkeit wieder als ausreichend hell.
+        Die Schwelle sollte über der Einschalt-Schwelle liegen, um Flattern bei
+        schwankender Außenhelligkeit zu vermeiden.
+      default: 150
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 1
+          unit_of_measurement: lx
+          mode: box
+
+    profile_1_start:
+      name: Profil 1 – Startzeit
+      default: "00:00:00"
+      selector:
+        time: {}
+
+    profile_1_brightness:
+      name: Profil 1 – Helligkeit
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+    profile_2_start:
+      name: Profil 2 – Startzeit
+      default: "06:00:00"
+      selector:
+        time: {}
+
+    profile_2_brightness:
+      name: Profil 2 – Helligkeit
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+    profile_3_start:
+      name: Profil 3 – Startzeit
+      default: "08:00:00"
+      selector:
+        time: {}
+
+    profile_3_brightness:
+      name: Profil 3 – Helligkeit
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+    profile_4_start:
+      name: Profil 4 – Startzeit
+      default: "18:00:00"
+      selector:
+        time: {}
+
+    profile_4_brightness:
+      name: Profil 4 – Helligkeit
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+
+mode: restart
+max_exceeded: silent
+
+triggers:
+  - trigger: state
+    id: activity
+    entity_id: !input trigger_entities
+    to: "on"
+
+  - trigger: numeric_state
+    id: ambient_dark
+    entity_id: !input ambient_light_sensor
+    below: !input ambient_light_on_threshold
+
+variables:
+  trigger_entities_input: !input trigger_entities
+  trigger_logic: !input trigger_logic
+
+  # Ein einzeln ausgewählter Sensor kann als String ankommen – hier wird immer
+  # eine Liste daraus gemacht.
+  trigger_entities: >
+    {{ trigger_entities_input if trigger_entities_input is not string
+       else ([trigger_entities_input] if trigger_entities_input else []) }}
+
+  # Wie viele Sensoren gleichzeitig aktiv sein müssen, damit eingeschaltet
+  # werden darf: bei UND alle, bei ODER genügt einer.
+  sensors_required: >
+    {% if trigger_logic == 'and' %}
+      {{ [trigger_entities | count, 1] | max }}
+    {% else %}
+      1
+    {% endif %}
+
+  target_lights: !input target_lights
+  use_ambient_light: !input use_ambient_light
+  ambient_light_sensor: !input ambient_light_sensor
+  ambient_light_on_threshold: !input ambient_light_on_threshold
+
+conditions:
+  - condition: and
+    conditions: !input condition_extra
+
+  - condition: or
+    conditions:
+      # Bewegung/Präsenz darf einschalten – aber nur, wenn keine
+      # Außenhelligkeitsprüfung aktiv ist oder es aktuell auch tatsächlich
+      # dunkel genug ist. Andernfalls bleibt ein hell gemeldeter Sensor
+      # (z. B. 12000 lx bei einer Schwelle von 100 lx) wirkungslos.
+      - condition: and
+        conditions:
+          - condition: trigger
+            id: activity
+          # Bei UND-Verknüpfung müssen alle Sensoren aktiv sein, bei ODER genügt
+          # der gerade ausgelöste Sensor.
+          - condition: template
+            value_template: >
+              {{ expand(trigger_entities)
+                 | selectattr('state', 'eq', 'on')
+                 | list
+                 | count >= sensors_required | int }}
+          - condition: template
+            value_template: >
+              {{ not use_ambient_light or ambient_light_sensor in ['', none]
+                 or states(ambient_light_sensor) in ['unknown', 'unavailable']
+                 or states(ambient_light_sensor) | float(0) < ambient_light_on_threshold }}
+
+      # Außenhelligkeit darf nur einschalten, wenn die Sensor-Verknüpfung
+      # erfüllt ist (ODER: mindestens ein Sensor, UND: alle Sensoren).
+      - condition: and
+        conditions:
+          - condition: trigger
+            id: ambient_dark
+          - condition: template
+            value_template: >
+              {{ expand(trigger_entities)
+                 | selectattr('state', 'eq', 'on')
+                 | list
+                 | count >= sensors_required | int }}
+
+  # Außenhelligkeit ist optional. Wenn sie nicht verwendet wird, darf der
+  # numerische Trigger wegen eines leeren Sensors nicht relevant werden.
+  - condition: template
+    value_template: >
+      {% if trigger.id == 'ambient_dark' %}
+        {{ use_ambient_light and ambient_light_sensor not in ['', none] }}
+      {% else %}
+        true
+      {% endif %}
+
+actions:
+  - variables:
+      current_time: "{{ now().strftime('%H:%M:%S') }}"
+
+      profile_1_start: !input profile_1_start
+      profile_2_start: !input profile_2_start
+      profile_3_start: !input profile_3_start
+      profile_4_start: !input profile_4_start
+
+      profile_1_brightness: !input profile_1_brightness
+      profile_2_brightness: !input profile_2_brightness
+      profile_3_brightness: !input profile_3_brightness
+      profile_4_brightness: !input profile_4_brightness
+
+  - variables:
+      brightness: >
+        {% set now = current_time %}
+        {% if now >= profile_4_start %}
+          {{ profile_4_brightness }}
+        {% elif now >= profile_3_start %}
+          {{ profile_3_brightness }}
+        {% elif now >= profile_2_start %}
+          {{ profile_2_brightness }}
+        {% elif now >= profile_1_start %}
+          {{ profile_1_brightness }}
+        {% else %}
+          {{ profile_4_brightness }}
+        {% endif %}
+
+  - action: light.turn_on
+    target:
+      entity_id: "{{ target_lights | select('match', '^light\\.') | list }}"
+    data:
+      brightness_pct: "{{ brightness | int }}"
+
+  - action: switch.turn_on
+    target:
+      entity_id: "{{ target_lights | select('match', '^switch\\.') | list }}"
+
+  # Für das Ausschalten gilt immer eine UND-Verknüpfung, unabhängig von der
+  # gewählten Einschalt-Verknüpfung: Solange mindestens ein Sensor aktiv ist,
+  # bleibt das Licht an. Erst wenn alle Sensoren aus sind, beginnt die
+  # Ausschaltverzögerung.
+  - wait_template: >
+      {{ expand(trigger_entities)
+         | selectattr('state', 'eq', 'on')
+         | list
+         | count == 0 }}
+
+  - delay: !input off_delay
+
+  # Sicherheitsprüfung nach der Verzögerung.
+  - condition: template
+    value_template: >
+      {{ expand(trigger_entities)
+         | selectattr('state', 'eq', 'on')
+         | list
+         | count == 0 }}
+
+  - action: light.turn_off
+    target:
+      entity_id: "{{ target_lights | select('match', '^light\\.') | list }}"
+
+  - action: switch.turn_off
+    target:
+      entity_id: "{{ target_lights | select('match', '^switch\\.') | list }}"

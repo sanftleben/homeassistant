@@ -1,0 +1,95 @@
+blueprint:
+  name: "Notify Open Sensors When Away"
+  description: "Sends a notification for each open door or window sensor when all selected persons have left home. Each open sensor triggers its own notification so you know exactly what was left open."
+  domain: automation
+  input:
+    persons:
+      name: "Persons / Device Trackers"
+      description: "Select all persons to monitor. The automation triggers only when ALL selected persons are away from home."
+      selector:
+        entity:
+          domain: person
+          multiple: true
+
+    sensors:
+      name: "Door / Window Sensors"
+      description: "Select all contact sensors that should be checked for the open state."
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class:
+            - door
+            - window
+            - garage_door
+            - opening
+          multiple: true
+
+    notify_service:
+      name: "Notification Service"
+      description: "The notification service to use. Example: notify.mobile_app_my_phone or notify.persistent_notification"
+      default: "notify.persistent_notification"
+      selector:
+        text:
+
+    notification_title:
+      name: "Notification Title"
+      description: "Title of the notification message."
+      default: "Home left - sensor still open!"
+      selector:
+        text:
+
+    notification_message_prefix:
+      name: "Message Prefix"
+      description: "Text shown before the sensor name in the notification body. The sensor friendly name is appended automatically."
+      default: "Warning: sensor is still open: "
+      selector:
+        text:
+
+    trigger_delay:
+      name: "Trigger Delay (seconds)"
+      description: "How long to wait after everyone has left before checking sensors and sending notifications. Useful to avoid false alerts for very short absences."
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 600
+          unit_of_measurement: seconds
+          mode: slider
+
+variables:
+  persons_input: !input persons
+  sensors_input: !input sensors
+  notify_svc: !input notify_service
+  notif_title: !input notification_title
+  notif_prefix: !input notification_message_prefix
+
+trigger:
+  - platform: state
+    entity_id: !input persons
+    to: "not_home"
+
+condition:
+  - condition: template
+    value_template: >-
+      {{ persons_input | map('states') | list | reject('eq', 'home') | list | count == persons_input | count }}
+
+action:
+  - delay:
+      seconds: !input trigger_delay
+
+  - condition: template
+    value_template: >-
+      {{ persons_input | map('states') | list | reject('eq', 'home') | list | count == persons_input | count }}
+
+  - repeat:
+      for_each: "{{ sensors_input }}"
+      sequence:
+        - condition: template
+          value_template: "{{ states(repeat.item) == 'on' }}"
+        - service: "{{ notify_svc }}"
+          data:
+            title: "{{ notif_title }}"
+            message: "{{ notif_prefix }}{{ state_attr(repeat.item, 'friendly_name') or repeat.item }}"
+
+mode: single
+max_exceeded: silent

@@ -1,0 +1,482 @@
+blueprint:
+  name: Raum lüften bei hoher Luftfeuchtigkeit
+  description: >
+    Sendet eine Benachrichtigung, wenn die Luftfeuchtigkeit eines oder mehrerer
+    Sensoren den Grenzwert für eine definierte Zeit überschreitet. Optional
+    werden Außentemperatur und Außenluftfeuchte berücksichtigt: Die Empfehlung
+    wird nur ausgesprochen, wenn die Außenluft tatsächlich trockener ist als die
+    Raumluft. Tür- und Fenstersensoren werden berücksichtigt: Ist bereits ein
+    Fenster oder eine Tür geöffnet, wird keine zusätzliche Lüftungsempfehlung
+    gesendet. Wird nach dem Lüften wieder geschlossen und die Luftfeuchtigkeit
+    ist weiterhin zu hoch, kann erneut benachrichtigt werden. Benachrichtigungen
+    werden nur gesendet, wenn mindestens eine der ausgewählten Personen zuhause
+    ist.
+  domain: automation
+  author: sanftleben
+
+  input:
+    humidity_sensors:
+      name: Luftfeuchtigkeitssensoren
+      description: Sensoren für die relative Luftfeuchtigkeit.
+      selector:
+        entity:
+          domain: sensor
+          device_class: humidity
+          multiple: true
+
+    humidity_threshold:
+      name: Luftfeuchtigkeit Grenzwert
+      description: Ab dieser relativen Luftfeuchtigkeit soll gelüftet werden.
+      default: 60
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    minimum_duration:
+      name: Mindestdauer über Grenzwert
+      description: >
+        Die Luftfeuchtigkeit muss mindestens so lange über dem Grenzwert liegen,
+        bevor eine Benachrichtigung ausgelöst wird. Das verhindert Meldungen
+        bei kurzen Messwertspitzen.
+      default:
+        minutes: 5
+      selector:
+        duration:
+
+    humidity_hysteresis:
+      name: Hysterese
+      description: >
+        Abstand unterhalb des Grenzwerts, ab dem die Luftfeuchtigkeit wieder
+        als normal gilt. Beispiel: Grenzwert 60 % und Hysterese 3 % bedeutet,
+        dass erst unter 57 % wieder Normalzustand erreicht wird.
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    outdoor_temperature_sensor:
+      name: Außentemperatursensor
+      description: >
+        Optional. Wird zusammen mit der Außenluftfeuchte benutzt, um zu
+        berechnen, ob die Außenluft trockener ist als die Raumluft. Bleibt das
+        Feld leer, wird ohne Prüfung der Außenbedingungen benachrichtigt.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    outdoor_humidity_sensor:
+      name: Außenluftfeuchtesensor
+      description: >
+        Optional. Relative Luftfeuchtigkeit draußen. Bleibt das Feld leer, wird
+        ohne Prüfung der Außenbedingungen benachrichtigt.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+          device_class: humidity
+
+    indoor_temperature_sensor:
+      name: Innentemperatursensor
+      description: >
+        Optional. Wird für die Berechnung der absoluten Luftfeuchtigkeit im Raum
+        benutzt. Ohne Sensor wird die angenommene Innentemperatur verwendet.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    assumed_indoor_temperature:
+      name: Angenommene Innentemperatur
+      description: >
+        Wird nur benutzt, wenn kein Innentemperatursensor ausgewählt ist oder
+        dieser keinen gültigen Wert liefert.
+      default: 21
+      selector:
+        number:
+          min: 5
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    min_absolute_humidity_difference:
+      name: Mindestunterschied absolute Luftfeuchtigkeit
+      description: >
+        Um so viel Gramm Wasser pro Kubikmeter muss die Außenluft trockener sein
+        als die Raumluft, damit Lüften empfohlen wird. Kleine Werte machen die
+        Empfehlung empfindlicher, große Werte zurückhaltender.
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.1
+          unit_of_measurement: "g/m³"
+          mode: slider
+
+    min_outdoor_temperature:
+      name: Mindest-Außentemperatur
+      description: >
+        Unterhalb dieser Außentemperatur wird nicht zum Lüften aufgefordert,
+        auch wenn die Außenluft trockener wäre. Frost- und Komfortgrenze.
+      default: 0
+      selector:
+        number:
+          min: -20
+          max: 20
+          step: 1
+          unit_of_measurement: "°C"
+          mode: slider
+
+    opening_sensors:
+      name: Tür-/Fenstersensoren
+      description: >
+        Fenster- und Türkontakte des Raumes. Ist mindestens einer davon offen,
+        gilt der Raum als bereits gelüftet.
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class:
+            - door
+            - window
+          multiple: true
+
+    persons:
+      name: Personen
+      description: >
+        Mindestens eine dieser Personen muss zuhause sein, damit eine
+        Benachrichtigung gesendet wird.
+      selector:
+        entity:
+          domain: person
+          multiple: true
+
+    notification_targets:
+      name: Benachrichtigungsziele
+      description: >
+        Notify-Entities, zum Beispiel Telegram, Alexa oder die Home Assistant
+        Mobile App.
+      selector:
+        entity:
+          domain: notify
+          multiple: true
+
+    room_name:
+      name: Raumname
+      description: Name des Raumes in der Benachrichtigung.
+      default: Raum
+      selector:
+        text:
+
+    notify_when_ventilating:
+      name: Beim Öffnen benachrichtigen
+      description: >
+        Benachrichtigt, dass bereits gelüftet wird, wenn ein Fenster oder eine
+        Tür geöffnet wird und die Luftfeuchtigkeit weiterhin hoch ist.
+      default: false
+      selector:
+        boolean: {}
+
+    notify_when_closing:
+      name: Nach dem Schließen erneut benachrichtigen
+      description: >
+        Wenn nach dem Schließen weiterhin zu hohe Luftfeuchtigkeit besteht,
+        wird erneut zum Lüften aufgefordert.
+      default: true
+      selector:
+        boolean: {}
+
+    closing_areas:
+      name: Beim Schließen geprüfte Bereiche
+      description: >
+        Optional. Beim Schließen eines Fensters oder einer Tür werden nur die
+        Luftfeuchtigkeitssensoren und Tür-/Fenstersensoren aus diesen Bereichen
+        geprüft. Bleibt das Feld leer, werden alle Sensoren geprüft.
+      default: []
+      selector:
+        area:
+          multiple: true
+
+    notify_when_normal:
+      name: Entwarnung senden
+      description: >
+        Sendet eine Nachricht, sobald die Luftfeuchtigkeit unter den
+        Grenzwert minus Hysterese fällt. Die Nachricht wird nur gesendet, wenn
+        im Raum noch ein Fenster oder eine Tür geöffnet ist.
+      default: false
+      selector:
+        boolean: {}
+
+mode: queued
+max: 10
+
+# Werte aus `variables` stehen in Trigger-Templates nicht zur Verfügung.
+# Alles, was ein Trigger-Template braucht, muss deshalb hier stehen.
+trigger_variables:
+  humidity_sensors: !input humidity_sensors
+  humidity_threshold: !input humidity_threshold
+  humidity_hysteresis: !input humidity_hysteresis
+  outdoor_temperature_sensor: !input outdoor_temperature_sensor
+  outdoor_humidity_sensor: !input outdoor_humidity_sensor
+  indoor_temperature_sensor: !input indoor_temperature_sensor
+  assumed_indoor_temperature: !input assumed_indoor_temperature
+  min_absolute_humidity_difference: !input min_absolute_humidity_difference
+  min_outdoor_temperature: !input min_outdoor_temperature
+
+trigger:
+  # Numeric-state triggers require a literal float for `above`/`below`, and the
+  # outside conditions cannot be expressed numerically at all. Both humidity
+  # thresholds are therefore evaluated with template triggers.
+  - platform: template
+    value_template: >-
+      {% set values = namespace(items=[]) %}
+      {% for sensor in humidity_sensors %}
+        {% set value = states(sensor) | float(none) %}
+        {% if value is not none %}
+          {% set values.items = values.items + [value] %}
+        {% endif %}
+      {% endfor %}
+      {{ values.items | count > 0 and (values.items | max) > (humidity_threshold | float(0)) }}
+    for: !input minimum_duration
+    id: humidity_high
+
+  # Fires when the humidity is too high *and* the outside air is dry enough.
+  # Because template triggers are edge triggered, this also fires when the
+  # humidity has been high for a while and only the weather has improved.
+  - platform: template
+    value_template: >-
+      {% set values = namespace(items=[]) %}
+      {% for sensor in humidity_sensors %}
+        {% set value = states(sensor) | float(none) %}
+        {% if value is not none %}
+          {% set values.items = values.items + [value] %}
+        {% endif %}
+      {% endfor %}
+      {% set indoor_humidity = (values.items | max) if values.items | count > 0 else none %}
+      {% set outdoor_temp = (states(outdoor_temperature_sensor) | float(none)) if outdoor_temperature_sensor else none %}
+      {% set outdoor_humidity = (states(outdoor_humidity_sensor) | float(none)) if outdoor_humidity_sensor else none %}
+      {% set measured_indoor_temp = (states(indoor_temperature_sensor) | float(none)) if indoor_temperature_sensor else none %}
+      {% set indoor_temp = measured_indoor_temp if measured_indoor_temp is not none else (assumed_indoor_temperature | float(21)) %}
+      {% if indoor_humidity is none %}
+        {{ false }}
+      {% elif indoor_humidity <= (humidity_threshold | float(0)) %}
+        {{ false }}
+      {% elif outdoor_temp is none or outdoor_humidity is none %}
+        {{ true }}
+      {% else %}
+        {% set ah_out = 6.112 * (e ** (17.67 * outdoor_temp / (outdoor_temp + 243.5))) * outdoor_humidity * 2.1674 / (273.15 + outdoor_temp) %}
+        {% set ah_in = 6.112 * (e ** (17.67 * indoor_temp / (indoor_temp + 243.5))) * indoor_humidity * 2.1674 / (273.15 + indoor_temp) %}
+        {{ ah_out <= ah_in - (min_absolute_humidity_difference | float(0)) and outdoor_temp >= (min_outdoor_temperature | float(0)) }}
+      {% endif %}
+    for: !input minimum_duration
+    id: ventilation_possible
+
+  - platform: template
+    value_template: >-
+      {% set values = namespace(items=[]) %}
+      {% for sensor in humidity_sensors %}
+        {% set value = states(sensor) | float(none) %}
+        {% if value is not none %}
+          {% set values.items = values.items + [value] %}
+        {% endif %}
+      {% endfor %}
+      {{ values.items | count > 0 and (values.items | max) < ((humidity_threshold | float(0)) - (humidity_hysteresis | float(0))) }}
+    for: !input minimum_duration
+    id: humidity_normal
+
+  - platform: state
+    entity_id: !input opening_sensors
+    to: "on"
+    id: opening
+
+  - platform: state
+    entity_id: !input opening_sensors
+    to: "off"
+    id: closing
+
+variables:
+  humidity_sensors: !input humidity_sensors
+  opening_sensors: !input opening_sensors
+  persons: !input persons
+  humidity_threshold: !input humidity_threshold
+  humidity_hysteresis: !input humidity_hysteresis
+  outdoor_temperature_sensor: !input outdoor_temperature_sensor
+  outdoor_humidity_sensor: !input outdoor_humidity_sensor
+  indoor_temperature_sensor: !input indoor_temperature_sensor
+  assumed_indoor_temperature: !input assumed_indoor_temperature
+  min_absolute_humidity_difference: !input min_absolute_humidity_difference
+  min_outdoor_temperature: !input min_outdoor_temperature
+  room_name: !input room_name
+  notify_when_ventilating: !input notify_when_ventilating
+  notify_when_closing: !input notify_when_closing
+  notify_when_normal: !input notify_when_normal
+  closing_areas: !input closing_areas
+
+  # On closing, only sensors in the selected areas are checked. All other
+  # triggers keep looking at every sensor.
+  restrict_to_areas: >-
+    {{ trigger.id == 'closing' and closing_areas | count > 0 }}
+
+  checked_humidity_sensors: >-
+    {% if restrict_to_areas %}
+      {{ humidity_sensors | select('in', closing_areas | map('area_entities') | sum(start=[])) | list }}
+    {% else %}
+      {{ humidity_sensors }}
+    {% endif %}
+
+  checked_opening_sensors: >-
+    {% if restrict_to_areas %}
+      {{ opening_sensors | select('in', closing_areas | map('area_entities') | sum(start=[])) | list }}
+    {% else %}
+      {{ opening_sensors }}
+    {% endif %}
+
+  humidity_values: >-
+    {% set values = namespace(items=[]) %}
+    {% for sensor in checked_humidity_sensors %}
+      {% set value = states(sensor) | float(none) %}
+      {% if value is not none %}
+        {% set values.items = values.items + [value] %}
+      {% endif %}
+    {% endfor %}
+    {{ values.items }}
+
+  max_humidity: >-
+    {{ (humidity_values | max) if humidity_values | count > 0 else 0 }}
+
+  # True when no usable outside readings are configured, so the blueprint keeps
+  # working like before when the optional sensors are left empty or fail.
+  ventilation_useful: >-
+    {% set outdoor_temp = (states(outdoor_temperature_sensor) | float(none)) if outdoor_temperature_sensor else none %}
+    {% set outdoor_humidity = (states(outdoor_humidity_sensor) | float(none)) if outdoor_humidity_sensor else none %}
+    {% set measured_indoor_temp = (states(indoor_temperature_sensor) | float(none)) if indoor_temperature_sensor else none %}
+    {% set indoor_temp = measured_indoor_temp if measured_indoor_temp is not none else (assumed_indoor_temperature | float(21)) %}
+    {% if outdoor_temp is none or outdoor_humidity is none or humidity_values | count == 0 %}
+      {{ true }}
+    {% else %}
+      {% set ah_out = 6.112 * (e ** (17.67 * outdoor_temp / (outdoor_temp + 243.5))) * outdoor_humidity * 2.1674 / (273.15 + outdoor_temp) %}
+      {% set ah_in = 6.112 * (e ** (17.67 * indoor_temp / (indoor_temp + 243.5))) * max_humidity * 2.1674 / (273.15 + indoor_temp) %}
+      {{ ah_out <= ah_in - (min_absolute_humidity_difference | float(0)) and outdoor_temp >= (min_outdoor_temperature | float(0)) }}
+    {% endif %}
+
+  anything_open: >-
+    {{ checked_opening_sensors | select('is_state', 'on') | list | count > 0 }}
+
+  # True when at least one of the selected persons is home.
+  someone_home: >-
+    {{ persons | select('is_state', 'home') | list | count > 0 }}
+
+condition: []
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: ventilation_possible
+          - condition: template
+            value_template: "{{ not anything_open }}"
+          - condition: template
+            value_template: "{{ someone_home }}"
+        sequence:
+          - action: notify.send_message
+            target:
+              entity_id: !input notification_targets
+            data:
+              title: "Lüften – {{ room_name }}"
+              message: >-
+                Im {{ room_name }} beträgt die Luftfeuchtigkeit aktuell
+                {{ max_humidity | round(0) }} %. Bitte lüften.
+
+      - conditions:
+          - condition: trigger
+            id: humidity_high
+          - condition: template
+            value_template: "{{ anything_open }}"
+          - condition: template
+            value_template: "{{ notify_when_ventilating }}"
+          - condition: template
+            value_template: "{{ someone_home }}"
+        sequence:
+          - action: notify.send_message
+            target:
+              entity_id: !input notification_targets
+            data:
+              title: "Lüften – {{ room_name }}"
+              message: >-
+                Im {{ room_name }} beträgt die Luftfeuchtigkeit aktuell
+                {{ max_humidity | round(0) }} %. Es wird bereits gelüftet.
+
+      - conditions:
+          - condition: trigger
+            id: opening
+          - condition: template
+            value_template: "{{ anything_open }}"
+          - condition: template
+            value_template: "{{ max_humidity > (humidity_threshold | float(0)) }}"
+          - condition: template
+            value_template: "{{ notify_when_ventilating }}"
+          - condition: template
+            value_template: "{{ someone_home }}"
+        sequence:
+          - action: notify.send_message
+            target:
+              entity_id: !input notification_targets
+            data:
+              title: "Lüften – {{ room_name }}"
+              message: >-
+                Im {{ room_name }} wird bereits gelüftet. Die Luftfeuchtigkeit
+                liegt bei {{ max_humidity | round(0) }} %.
+
+      - conditions:
+          - condition: trigger
+            id: closing
+          - condition: template
+            value_template: "{{ not anything_open }}"
+          - condition: template
+            value_template: "{{ max_humidity > (humidity_threshold | float(0)) }}"
+          - condition: template
+            value_template: "{{ ventilation_useful }}"
+          - condition: template
+            value_template: "{{ notify_when_closing }}"
+          - condition: template
+            value_template: "{{ someone_home }}"
+        sequence:
+          - action: notify.send_message
+            target:
+              entity_id: !input notification_targets
+            data:
+              title: "Weiter lüften – {{ room_name }}"
+              message: >-
+                Im {{ room_name }} beträgt die Luftfeuchtigkeit weiterhin
+                {{ max_humidity | round(0) }} %. Bitte weiter lüften.
+
+      - conditions:
+          - condition: trigger
+            id: humidity_normal
+          - condition: template
+            value_template: "{{ anything_open }}"
+          - condition: template
+            value_template: "{{ notify_when_normal }}"
+          - condition: template
+            value_template: "{{ someone_home }}"
+        sequence:
+          - action: notify.send_message
+            target:
+              entity_id: !input notification_targets
+            data:
+              title: "Luftfeuchtigkeit normal – {{ room_name }}"
+              message: >-
+                Die Luftfeuchtigkeit im {{ room_name }} ist wieder normal
+                ({{ max_humidity | round(0) }} %).
