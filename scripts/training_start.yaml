@@ -1,0 +1,42 @@
+# Starts the training setup: Denon AVR on, Spotify input, playlist in shuffle mode.
+# Paste into the Home Assistant script editor (Edit in YAML). The script name is set when saving.
+alias: Training starten
+icon: mdi:dumbbell
+mode: single
+variables:
+  avr: media_player.denon_avr
+  spotify: media_player.spotify_antivist
+  # Name of the Denon as shown in Spotify Connect
+  spotify_connect_device: Denon AVR-X1400H
+  # Input name as configured on the AVR
+  avr_source: NET
+  # Share link of the playlist "elektro": spotify:playlist:<id>
+  playlist_uri: spotify:playlist:7ej8Sgu6PC8YnUhNL8JTvI
+sequence:
+  - action: media_player.turn_on
+    target:
+      entity_id: "{{ avr }}"
+  - wait_template: "{{ not is_state(avr, ['off', 'unavailable', 'unknown']) }}"
+    timeout: "00:00:30"
+    continue_on_timeout: false
+  - action: media_player.select_source
+    target:
+      entity_id: "{{ avr }}"
+    data:
+      source: "{{ avr_source }}"
+  - action: media_player.select_source
+    target:
+      entity_id: "{{ spotify }}"
+    data:
+      source: "{{ spotify_connect_device }}"
+  - action: media_player.shuffle_set
+    target:
+      entity_id: "{{ spotify }}"
+    data:
+      shuffle: true
+  - action: media_player.play_media
+    target:
+      entity_id: "{{ spotify }}"
+    data:
+      media_content_type: playlist
+      media_content_id: "{{ playlist_uri }}"
