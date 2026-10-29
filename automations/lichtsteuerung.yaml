@@ -5,6 +5,8 @@ blueprint:
     Mehrere Sensoren können zum Einschalten wahlweise mit ODER oder UND verknüpft
     werden. Zum Ausschalten gilt immer UND: Erst wenn alle Sensoren inaktiv sind,
     startet die Ausschaltverzögerung.
+    Optional kann eine Einschaltverzögerung festlegen, wie lange Anwesenheit
+    bestehen muss, bevor das Licht angeht.
     Die Helligkeit wird abhängig von vier Zeitprofilen gesetzt. Optional kann ein
     Außen-Helligkeitssensor das Einschalten auslösen, wenn es dunkel wird und
     gleichzeitig die Sensor-Verknüpfung erfüllt ist.
@@ -57,6 +59,18 @@ blueprint:
           filter:
             - domain: light
             - domain: switch
+
+    on_delay:
+      name: Einschaltverzögerung (Mindest-Anwesenheit)
+      description: >
+        So lange muss die Sensor-Verknüpfung ununterbrochen erfüllt sein, bevor
+        das Licht eingeschaltet wird (ODER: mindestens ein Sensor aktiv, UND: alle
+        Sensoren aktiv). Fällt die Anwesenheit vorher weg, bleibt das Licht aus.
+        0 = sofort einschalten.
+      default:
+        seconds: 0
+      selector:
+        duration: {}
 
     off_delay:
       name: Ausschaltverzögerung
@@ -308,15 +322,34 @@ actions:
           {{ profile_4_brightness }}
         {% endif %}
 
-  - action: light.turn_on
-    target:
-      entity_id: "{{ target_lights | select('match', '^light\\.') | list }}"
-    data:
-      brightness_pct: "{{ brightness | int }}"
+  # Einschaltverzögerung: Die Sensor-Verknüpfung muss für die eingestellte Zeit
+  # ununterbrochen erfüllt bleiben. Fällt sie vorher weg, ist wait.completed
+  # true und das Licht wird nicht eingeschaltet. Bei 0 läuft der Timeout sofort
+  # ab und es wird direkt eingeschaltet.
+  - wait_template: >
+      {{ expand(trigger_entities)
+         | selectattr('state', 'eq', 'on')
+         | list
+         | count < sensors_required | int }}
+    timeout: !input on_delay
+    continue_on_timeout: true
 
-  - action: switch.turn_on
-    target:
-      entity_id: "{{ target_lights | select('match', '^switch\\.') | list }}"
+  # Der Ausschaltpfad danach läuft immer weiter, damit ein bereits
+  # eingeschaltetes Licht auch nach einem abgebrochenen Einschalten wieder
+  # ausgeht.
+  - if:
+      - condition: template
+        value_template: "{{ not wait.completed }}"
+    then:
+      - action: light.turn_on
+        target:
+          entity_id: "{{ target_lights | select('match', '^light\\.') | list }}"
+        data:
+          brightness_pct: "{{ brightness | int }}"
+
+      - action: switch.turn_on
+        target:
+          entity_id: "{{ target_lights | select('match', '^switch\\.') | list }}"
 
   # Für das Ausschalten gilt immer eine UND-Verknüpfung, unabhängig von der
   # gewählten Einschalt-Verknüpfung: Solange mindestens ein Sensor aktiv ist,

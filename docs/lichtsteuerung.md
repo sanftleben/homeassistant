@@ -19,6 +19,7 @@ Alternativ kann der Blueprint über **Einstellungen → Automationen & Szenen �
 - Eine oder mehrere Leuchten und/oder Schalter (z. B. Leuchten in einer Steckdose)
 - Vier frei konfigurierbare Tageszeit-/Helligkeitsprofile
 - Individuelle Helligkeit von 1–100 %
+- Einstellbare Einschaltverzögerung (Mindest-Anwesenheit, bevor das Licht angeht)
 - Einstellbare Ausschaltverzögerung
 - Optionale zusätzliche Home-Assistant-Bedingungen
 - Optionaler Außen-Helligkeitssensor in Lux
@@ -183,6 +184,27 @@ Ausschaltverzögerung
 Licht AUS
 ```
 
+## Einschaltverzögerung
+
+Legt fest, wie lange die [Sensor-Verknüpfung](#verknüpfung-der-sensoren) ununterbrochen erfüllt sein muss, bevor das Licht eingeschaltet wird. Standard ist `0` – das Licht geht sofort an.
+
+Das ist nützlich, um kurzes Durchlaufen eines Raums zu ignorieren.
+
+```text
+Einschaltverzögerung = 10 Sekunden
+
+Präsenz ON
+→ 10 Sekunden warten
+Präsenz weiterhin ON
+→ Licht EIN
+
+Präsenz ON
+→ nach 4 Sekunden Präsenz OFF
+→ Licht bleibt aus
+```
+
+Die Einschaltverzögerung gilt auch für den Außenhelligkeits-Trigger: Fällt die Außenhelligkeit unter die Schwelle, muss die Anwesenheit noch die eingestellte Zeit bestehen bleiben.
+
 ## Ausschaltverzögerung
 
 Die Ausschaltverzögerung beginnt erst, wenn alle Bewegungs-/Präsenzsensoren `off` sind.
@@ -241,6 +263,9 @@ Außenhelligkeit:
 Leuchten:
   light.wohnzimmer_decke
   light.wohnzimmer_stehlampe
+
+Einschaltverzögerung:
+  5 Sekunden
 
 Ausschaltverzögerung:
   3 Minuten
