@@ -10,7 +10,7 @@ A Home Assistant automation blueprint that sends a notification for every open d
 
 - **Multiple persons** – select any number of `person.*` entities; the automation only triggers when **all** of them are away
 - **Multiple sensors** – select any number of binary sensors (door, window, garage door, opening); each open sensor sends its own notification
-- **Configurable notification service** – works with any `notify.*` service (mobile app, persistent notification, Telegram, etc.)
+- **Notification entities or service** – send via `notify.send_message` to notify entities (e.g. Telegram bot, mobile app), or fall back to any legacy `notify.*` service
 - **Customisable message** – set your own title and message prefix
 - **Trigger delay** – optional grace period to avoid false alerts for very short absences
 
@@ -23,7 +23,7 @@ A Home Assistant automation blueprint that sends a notification for every open d
 | Home Assistant | 2023.4 or newer (for `repeat: for_each`) |
 | Person entities | At least one `person.*` entity with a linked device tracker |
 | Binary sensors | Contact sensors with device class `door`, `window`, `garage_door`, or `opening` |
-| Notify service | Any service under the `notify` domain |
+| Notification target | A `notify.*` entity, or any legacy service under the `notify` domain |
 
 ---
 
@@ -55,7 +55,8 @@ Replace `<YOUR_HA_URL>` with your local Home Assistant address:
 |---|---|---|
 | **Persons / Device Trackers** | One or more `person.*` entities to monitor | – |
 | **Door / Window Sensors** | One or more `binary_sensor.*` entities to check | – |
-| **Notification Service** | e.g. `notify.mobile_app_my_phone` | `notify.persistent_notification` |
+| **Notification Entities** | One or more `notify.*` entities; messages go out via `notify.send_message` | – |
+| **Notification Service (legacy)** | Used only when no entity is selected, e.g. `notify.mobile_app_my_phone` | `notify.persistent_notification` |
 | **Notification Title** | Title shown in the notification | `🏠 Left home – sensor still open!` |
 | **Message Prefix** | Text before the sensor name in the body | `Warning: sensor is still open: ` |
 | **Trigger Delay (seconds)** | Grace period before checking sensors (0–600 s) | `30` |
@@ -79,7 +80,8 @@ Are ALL persons still away?  ──No──► Stop
         ▼
 For each sensor in the list:
   Is sensor open (state == "on")?
-    Yes ──► Send notification via <notify_service>
+    Yes ──► Send notification to <notify_entities>
+            (or via <notify_service> if no entity is selected)
     No  ──► Skip
 ```
 
@@ -98,7 +100,7 @@ Each open sensor produces its own notification so you can see at a glance which 
 
 **No notification received**
 - Confirm all persons are actually in state `not_home` (check Developer Tools → States).
-- Verify the notify service name is spelled correctly (case-sensitive).
+- If you use the legacy service, verify the name is spelled correctly (case-sensitive) and still exists; prefer a notification entity.
 - Check the Home Assistant automation trace for the exact condition that failed.
 
 **Too many false alerts**

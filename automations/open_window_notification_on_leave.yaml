@@ -24,9 +24,18 @@ blueprint:
             - opening
           multiple: true
 
+    notify_entities:
+      name: "Notification Entities"
+      description: "Notify entities that receive the message via notify.send_message (e.g. a Telegram bot or mobile app entity). If set, the notification service below is ignored."
+      default: []
+      selector:
+        entity:
+          domain: notify
+          multiple: true
+
     notify_service:
-      name: "Notification Service"
-      description: "The notification service to use. Example: notify.mobile_app_my_phone or notify.persistent_notification"
+      name: "Notification Service (legacy)"
+      description: "Only used when no notification entity is selected. Example: notify.mobile_app_my_phone or notify.persistent_notification"
       default: "notify.persistent_notification"
       selector:
         text:
@@ -59,6 +68,7 @@ blueprint:
 variables:
   persons_input: !input persons
   sensors_input: !input sensors
+  notify_targets: !input notify_entities
   notify_svc: !input notify_service
   notif_title: !input notification_title
   notif_prefix: !input notification_message_prefix
@@ -86,10 +96,23 @@ action:
       sequence:
         - condition: template
           value_template: "{{ states(repeat.item) == 'on' }}"
-        - service: "{{ notify_svc }}"
-          data:
-            title: "{{ notif_title }}"
-            message: "{{ notif_prefix }}{{ state_attr(repeat.item, 'friendly_name') or repeat.item }}"
+        - variables:
+            notif_message: "{{ notif_prefix }}{{ state_attr(repeat.item, 'friendly_name') or repeat.item }}"
+        - if:
+            - condition: template
+              value_template: "{{ notify_targets | count > 0 }}"
+          then:
+            - action: notify.send_message
+              target:
+                entity_id: "{{ notify_targets }}"
+              data:
+                title: "{{ notif_title }}"
+                message: "{{ notif_message }}"
+          else:
+            - action: "{{ notify_svc }}"
+              data:
+                title: "{{ notif_title }}"
+                message: "{{ notif_message }}"
 
 mode: single
 max_exceeded: silent
