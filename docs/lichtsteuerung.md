@@ -21,10 +21,11 @@ Alternativ kann der Blueprint über **Einstellungen → Automationen & Szenen �
 - Individuelle Helligkeit von 1–100 %
 - Einstellbare Einschaltverzögerung (Mindest-Anwesenheit, bevor das Licht angeht)
 - Einstellbare Ausschaltverzögerung
+- Maximale Leuchtdauer ohne neue Aktivität als Schutz gegen hängende Sensoren
 - Optionale zusätzliche Home-Assistant-Bedingungen
 - Optionaler Außen-Helligkeitssensor in Lux
 - Außenhelligkeit kann das Licht einschalten, wenn jemand im Raum ist
-- Außenhelligkeit schaltet das Licht niemals aus
+- Steigt die Außenhelligkeit über die Rückkehr-Schwelle, geht das Licht wieder aus
 - Das Licht wird erst ausgeschaltet, wenn **alle** Bewegungs-/Präsenzsensoren inaktiv sind (immer UND, unabhängig von der Einschalt-Verknüpfung)
 - Neue Bewegung/Präsenz während der Ausschaltverzögerung startet die Automation neu
 
@@ -113,9 +114,9 @@ Präsenz = on
 → Licht geht an
 ```
 
-Umgekehrt wird das Licht **nicht ausgeschaltet**, wenn es draußen wieder heller wird.
+Umgekehrt wird das Licht **ausgeschaltet**, sobald die Außenhelligkeit über die [Rückkehr-Schwelle](#hysterese) steigt – auch wenn noch jemand im Raum ist. Das gilt nur, wenn die Außenhelligkeitsprüfung aktiviert ist.
 
-Das Ausschalten erfolgt ausschließlich über die Bewegungs-/Präsenzsensoren und die eingestellte Ausschaltverzögerung.
+Ansonsten erfolgt das Ausschalten über die Bewegungs-/Präsenzsensoren und die eingestellte Ausschaltverzögerung.
 
 ## Hysterese
 
@@ -149,7 +150,7 @@ Damit wird verhindert, dass die Automation bei kleinen Schwankungen der Außenhe
 → wieder hell
 ```
 
-Die Außenhelligkeit schaltet das Licht dabei nicht aus.
+Beim Überschreiten der Rückkehr-Schwelle (hier 151 lx) wird das Licht ausgeschaltet.
 
 ## Bewegungs-/Präsenzsensoren
 
@@ -216,6 +217,22 @@ Ausschaltverzögerung = 2 Minuten
 ```
 
 Wenn innerhalb dieser Zeit wieder Bewegung oder Präsenz erkannt wird, startet die Automation neu und das Licht bleibt an.
+
+## Maximale Leuchtdauer ohne neue Aktivität
+
+Schutz gegen hängende Sensoren, z. B. einen Präsenzsensor, der nachts stundenlang fälschlich `on` meldet. Standard ist `30 Minuten`, `0` deaktiviert die Begrenzung.
+
+Jede neue Auslösung (ein Sensor wechselt auf `on` und die [Sensor-Verknüpfung](#verknüpfung-der-sensoren) ist erfüllt) startet die Zeit neu. Läuft sie ab, wird das Licht sofort ausgeschaltet, auch wenn noch ein Sensor aktiv ist.
+
+```text
+Maximale Leuchtdauer = 30 Minuten
+
+00:07 Bewegung ON, Präsenz ON  → Licht EIN
+00:12 Bewegung OFF, Präsenz bleibt hängend ON
+00:42 keine neue Auslösung     → Licht AUS
+```
+
+In Räumen, in denen man lange still sitzt (Sofa, Schreibtisch) und kein Sensor neu auslöst, den Wert erhöhen oder mit `0` deaktivieren.
 
 ## Tageszeitprofile
 
@@ -349,11 +366,12 @@ Bewegung = OFF, Präsenz = ON
 ### Szenario 8 – Außen wird wieder heller
 
 ```text
-Außenhelligkeit > 150 lx
-→ Licht bleibt unverändert
+Licht ist an, Präsenz = ON
+Außenhelligkeit steigt über 150 lx (Rückkehr-Schwelle)
+→ Licht AUS
 ```
 
-Das ist absichtlich so. Ein hellerer Außenwert soll niemals eine laufende Beleuchtung abschalten.
+Solange es hell bleibt, schalten Bewegung/Präsenz das Licht nicht wieder ein.
 
 ## Voraussetzungen
 

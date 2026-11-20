@@ -10,7 +10,8 @@ blueprint:
     Die Helligkeit wird abhängig von vier Zeitprofilen gesetzt. Optional kann ein
     Außen-Helligkeitssensor das Einschalten auslösen, wenn es dunkel wird und
     gleichzeitig die Sensor-Verknüpfung erfüllt ist.
-    Die Außenhelligkeit schaltet das Licht niemals aus.
+    Steigt die Außenhelligkeit über die Rückkehr-Schwelle, wird das Licht
+    wieder ausgeschaltet.
   domain: automation
 
   input:
@@ -81,6 +82,19 @@ blueprint:
       selector:
         duration: {}
 
+    max_on_time:
+      name: Maximale Leuchtdauer ohne neue Aktivität
+      description: >
+        Schutz gegen hängende Sensoren (z. B. ein Präsenzsensor, der stundenlang
+        "belegt" meldet): Löst in dieser Zeit kein Sensor erneut aus, wird das
+        Licht ausgeschaltet, auch wenn noch ein Sensor aktiv ist. Bei Räumen, in
+        denen man lange still sitzt (Sofa, Schreibtisch), höher stellen oder mit
+        0 deaktivieren.
+      default:
+        minutes: 30
+      selector:
+        duration: {}
+
     condition_extra:
       name: Zusätzliche Bedingungen
       description: Optionale zusätzliche Home-Assistant-Bedingungen.
@@ -127,8 +141,8 @@ blueprint:
     ambient_light_reset_threshold:
       name: Rückkehr-Schwelle Außenhelligkeit
       description: >
-        Oberhalb dieses Wertes gilt die Helligkeit wieder als ausreichend hell.
-        Die Schwelle sollte über der Einschalt-Schwelle liegen, um Flattern bei
+        Oberhalb dieses Wertes gilt die Helligkeit wieder als ausreichend hell
+        und das Licht wird ausgeschaltet. Die Schwelle sollte über der Einschalt-Schwelle liegen, um Flattern bei
         schwankender Außenhelligkeit zu vermeiden.
       default: 150
       selector:
@@ -218,6 +232,11 @@ triggers:
     entity_id: !input ambient_light_sensor
     below: !input ambient_light_on_threshold
 
+  - trigger: numeric_state
+    id: ambient_bright
+    entity_id: !input ambient_light_sensor
+    above: !input ambient_light_reset_threshold
+
 variables:
   trigger_entities_input: !input trigger_entities
   trigger_logic: !input trigger_logic
@@ -238,6 +257,14 @@ variables:
     {% endif %}
 
   target_lights: !input target_lights
+  max_on_time: !input max_on_time
+  # 0 = keine Begrenzung; ~1 Jahr wirkt bei mode: restart wie "unbegrenzt".
+  max_on_seconds: >
+    {% set d = max_on_time %}
+    {% set s = (d.get('days', 0) * 86400 + d.get('hours', 0) * 3600
+                + d.get('minutes', 0) * 60 + d.get('seconds', 0))
+               if d is mapping else as_timedelta(d | string).total_seconds() %}
+    {{ s if s > 0 else 31536000 }}
   use_ambient_light: !input use_ambient_light
   ambient_light_sensor: !input ambient_light_sensor
   ambient_light_on_threshold: !input ambient_light_on_threshold
@@ -283,17 +310,33 @@ conditions:
                  | list
                  | count >= sensors_required | int }}
 
-  # Außenhelligkeit ist optional. Wenn sie nicht verwendet wird, darf der
-  # numerische Trigger wegen eines leeren Sensors nicht relevant werden.
+      # Wieder hell genug: Licht aus, unabhängig von den Sensoren.
+      - condition: trigger
+        id: ambient_bright
+
+  # Außenhelligkeit ist optional. Wenn sie nicht verwendet wird, dürfen die
+  # numerischen Trigger wegen eines leeren Sensors nicht relevant werden.
   - condition: template
     value_template: >
-      {% if trigger.id == 'ambient_dark' %}
+      {% if trigger.id in ['ambient_dark', 'ambient_bright'] %}
         {{ use_ambient_light and ambient_light_sensor not in ['', none] }}
       {% else %}
         true
       {% endif %}
 
 actions:
+  - if:
+      - condition: trigger
+        id: ambient_bright
+    then:
+      - action: light.turn_off
+        target:
+          entity_id: "{{ target_lights | select('match', '^light\\.') | list }}"
+      - action: switch.turn_off
+        target:
+          entity_id: "{{ target_lights | select('match', '^switch\\.') | list }}"
+      - stop: Außen wieder hell
+
   - variables:
       current_time: "{{ now().strftime('%H:%M:%S') }}"
 
@@ -355,21 +398,34 @@ actions:
   # gewählten Einschalt-Verknüpfung: Solange mindestens ein Sensor aktiv ist,
   # bleibt das Licht an. Erst wenn alle Sensoren aus sind, beginnt die
   # Ausschaltverzögerung.
+  # Jede neue Aktivität startet die Automation neu (mode: restart) und damit
+  # auch die maximale Leuchtdauer. Läuft sie ab, gilt der Sensor als hängend.
   - wait_template: >
       {{ expand(trigger_entities)
          | selectattr('state', 'eq', 'on')
          | list
          | count == 0 }}
+    timeout: "{{ max_on_seconds | float }}"
+    continue_on_timeout: true
 
-  - delay: !input off_delay
+  - variables:
+      max_on_time_reached: "{{ not wait.completed }}"
 
-  # Sicherheitsprüfung nach der Verzögerung.
+  - if:
+      - condition: template
+        value_template: "{{ not max_on_time_reached }}"
+    then:
+      - delay: !input off_delay
+
+  # Sicherheitsprüfung nach der Verzögerung (entfällt nach Ablauf der
+  # maximalen Leuchtdauer, weil dann noch ein Sensor aktiv ist).
   - condition: template
     value_template: >
-      {{ expand(trigger_entities)
-         | selectattr('state', 'eq', 'on')
-         | list
-         | count == 0 }}
+      {{ max_on_time_reached
+         or expand(trigger_entities)
+            | selectattr('state', 'eq', 'on')
+            | list
+            | count == 0 }}
 
   - action: light.turn_off
     target:
