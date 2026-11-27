@@ -237,6 +237,19 @@ triggers:
     entity_id: !input ambient_light_sensor
     above: !input ambient_light_reset_threshold
 
+  # Ausschalten auch ohne laufenden Durchlauf: wenn ein Sensor ausgeht oder das
+  # Licht anders eingeschaltet wird (z. B. per Sprachassistent), während keiner
+  # der Sensoren aktiv ist.
+  - trigger: state
+    id: inactive
+    entity_id: !input trigger_entities
+    to: "off"
+
+  - trigger: state
+    id: inactive
+    entity_id: !input target_lights
+    to: "on"
+
 variables:
   trigger_entities_input: !input trigger_entities
   trigger_logic: !input trigger_logic
@@ -270,45 +283,66 @@ variables:
   ambient_light_on_threshold: !input ambient_light_on_threshold
 
 conditions:
-  - condition: and
-    conditions: !input condition_extra
-
   - condition: or
     conditions:
-      # Bewegung/Präsenz darf einschalten – aber nur, wenn keine
-      # Außenhelligkeitsprüfung aktiv ist oder es aktuell auch tatsächlich
-      # dunkel genug ist. Andernfalls bleibt ein hell gemeldeter Sensor
-      # (z. B. 12000 lx bei einer Schwelle von 100 lx) wirkungslos.
+      # Einschalten: nur wenn die zusätzlichen Bedingungen erfüllt sind.
       - condition: and
         conditions:
-          - condition: trigger
-            id: activity
-          # Bei UND-Verknüpfung müssen alle Sensoren aktiv sein, bei ODER genügt
-          # der gerade ausgelöste Sensor.
-          - condition: template
-            value_template: >
-              {{ expand(trigger_entities)
-                 | selectattr('state', 'eq', 'on')
-                 | list
-                 | count >= sensors_required | int }}
-          - condition: template
-            value_template: >
-              {{ not use_ambient_light or ambient_light_sensor in ['', none]
-                 or states(ambient_light_sensor) in ['unknown', 'unavailable']
-                 or states(ambient_light_sensor) | float(0) < ambient_light_on_threshold }}
+          - condition: and
+            conditions: !input condition_extra
 
-      # Außenhelligkeit darf nur einschalten, wenn die Sensor-Verknüpfung
-      # erfüllt ist (ODER: mindestens ein Sensor, UND: alle Sensoren).
+          - condition: or
+            conditions:
+              # Bewegung/Präsenz darf einschalten – aber nur, wenn keine
+              # Außenhelligkeitsprüfung aktiv ist oder es aktuell auch tatsächlich
+              # dunkel genug ist. Andernfalls bleibt ein hell gemeldeter Sensor
+              # (z. B. 12000 lx bei einer Schwelle von 100 lx) wirkungslos.
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: activity
+                  # Bei UND-Verknüpfung müssen alle Sensoren aktiv sein, bei ODER genügt
+                  # der gerade ausgelöste Sensor.
+                  - condition: template
+                    value_template: >
+                      {{ expand(trigger_entities)
+                         | selectattr('state', 'eq', 'on')
+                         | list
+                         | count >= sensors_required | int }}
+                  - condition: template
+                    value_template: >
+                      {{ not use_ambient_light or ambient_light_sensor in ['', none]
+                         or states(ambient_light_sensor) in ['unknown', 'unavailable']
+                         or states(ambient_light_sensor) | float(0) < ambient_light_on_threshold }}
+
+              # Außenhelligkeit darf nur einschalten, wenn die Sensor-Verknüpfung
+              # erfüllt ist (ODER: mindestens ein Sensor, UND: alle Sensoren).
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: ambient_dark
+                  - condition: template
+                    value_template: >
+                      {{ expand(trigger_entities)
+                         | selectattr('state', 'eq', 'on')
+                         | list
+                         | count >= sensors_required | int }}
+
+      # Ausschalten gilt immer, unabhängig von den zusätzlichen Bedingungen.
       - condition: and
         conditions:
           - condition: trigger
-            id: ambient_dark
+            id: inactive
           - condition: template
             value_template: >
               {{ expand(trigger_entities)
                  | selectattr('state', 'eq', 'on')
                  | list
-                 | count >= sensors_required | int }}
+                 | count == 0
+                 and expand(target_lights)
+                 | selectattr('state', 'eq', 'on')
+                 | list
+                 | count > 0 }}
 
       # Wieder hell genug: Licht aus, unabhängig von den Sensoren.
       - condition: trigger
@@ -369,30 +403,34 @@ actions:
   # ununterbrochen erfüllt bleiben. Fällt sie vorher weg, ist wait.completed
   # true und das Licht wird nicht eingeschaltet. Bei 0 läuft der Timeout sofort
   # ab und es wird direkt eingeschaltet.
-  - wait_template: >
-      {{ expand(trigger_entities)
-         | selectattr('state', 'eq', 'on')
-         | list
-         | count < sensors_required | int }}
-    timeout: !input on_delay
-    continue_on_timeout: true
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id != 'inactive' }}"
+    then:
+      - wait_template: >
+          {{ expand(trigger_entities)
+             | selectattr('state', 'eq', 'on')
+             | list
+             | count < sensors_required | int }}
+        timeout: !input on_delay
+        continue_on_timeout: true
 
   # Der Ausschaltpfad danach läuft immer weiter, damit ein bereits
   # eingeschaltetes Licht auch nach einem abgebrochenen Einschalten wieder
   # ausgeht.
-  - if:
-      - condition: template
-        value_template: "{{ not wait.completed }}"
-    then:
-      - action: light.turn_on
-        target:
-          entity_id: "{{ target_lights | select('match', '^light\\.') | list }}"
-        data:
-          brightness_pct: "{{ brightness | int }}"
+      - if:
+          - condition: template
+            value_template: "{{ not wait.completed }}"
+        then:
+          - action: light.turn_on
+            target:
+              entity_id: "{{ target_lights | select('match', '^light\\.') | list }}"
+            data:
+              brightness_pct: "{{ brightness | int }}"
 
-      - action: switch.turn_on
-        target:
-          entity_id: "{{ target_lights | select('match', '^switch\\.') | list }}"
+          - action: switch.turn_on
+            target:
+              entity_id: "{{ target_lights | select('match', '^switch\\.') | list }}"
 
   # Für das Ausschalten gilt immer eine UND-Verknüpfung, unabhängig von der
   # gewählten Einschalt-Verknüpfung: Solange mindestens ein Sensor aktiv ist,

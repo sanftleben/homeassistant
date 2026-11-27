@@ -28,6 +28,8 @@ Alternativ kann der Blueprint über **Einstellungen → Automationen & Szenen �
 - Steigt die Außenhelligkeit über die Rückkehr-Schwelle, geht das Licht wieder aus
 - Das Licht wird erst ausgeschaltet, wenn **alle** Bewegungs-/Präsenzsensoren inaktiv sind (immer UND, unabhängig von der Einschalt-Verknüpfung)
 - Neue Bewegung/Präsenz während der Ausschaltverzögerung startet die Automation neu
+- Licht geht auch aus, wenn es anders eingeschaltet wurde (z. B. per Sprachassistent) oder ein Durchlauf vorzeitig endete – sobald alle Sensoren `off` sind
+- Zusätzliche Bedingungen gelten nur für das Einschalten, nie für das Ausschalten
 
 ## Logik
 
@@ -233,6 +235,24 @@ Maximale Leuchtdauer = 30 Minuten
 ```
 
 In Räumen, in denen man lange still sitzt (Sofa, Schreibtisch) und kein Sensor neu auslöst, den Wert erhöhen oder mit `0` deaktivieren.
+
+## Ausschalten ohne laufenden Durchlauf
+
+Die Automation reagiert zusätzlich darauf, dass ein Sensor auf `off` wechselt oder eine der Leuchten eingeschaltet wird. Sind dann alle Sensoren `off` und mindestens eine Leuchte an, läuft die Ausschaltverzögerung und das Licht geht aus.
+
+Das fängt Fälle ab, in denen sonst niemand ausschalten würde:
+
+```text
+Licht per Sprachassistent eingeschaltet, Sensoren OFF
+→ Ausschaltverzögerung → Licht AUS
+
+Bewegung OFF und sofort wieder ON (UND-Verknüpfung, Präsenz OFF)
+→ kein neuer Einschalt-Durchlauf
+Bewegung OFF
+→ Ausschaltverzögerung → Licht AUS
+```
+
+Die [zusätzlichen Bedingungen](#beispielkonfiguration) (z. B. ein Zeitfenster) gelten nur für das Einschalten. Ausgeschaltet wird immer – auch beim Überschreiten der Rückkehr-Schwelle der Außenhelligkeit.
 
 ## Tageszeitprofile
 
